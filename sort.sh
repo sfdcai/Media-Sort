@@ -6,14 +6,8 @@ set -o errexit
 set -o pipefail
 
 # Hardcoded source and destination directories
-SOURCE_DIR="/media/amit/FP80/moveme/"          # Replace with actual source directory
-DEST_DIR="/media/amit/FP80/sort/"  # Hardcoded destination directory
-
-# Dry-run mode
-DRY_RUN=false
-if [[ "$1" == "--dry-run" ]]; then
-    DRY_RUN=true
-fi
+SOURCE_DIR="/media/amit/FP80/Internal/"          # Replace with actual source directory
+DEST_DIR="/media/amit/01DB4A1B056D4060/Sorted"  # Hardcoded destination directory
 
 # Verify source directory exists
 if [[ ! -d "$SOURCE_DIR" ]]; then
@@ -55,27 +49,45 @@ process_file() {
     fi
 
     # Try to get the date from EXIF metadata (photos and videos)
-    DATE=$(exiftool -DateTimeOriginal -d "%Y-%m-%d" "$FILE" | awk -F': ' '{print $2}' | tr -d '[:space:]')
+    DATE=$(exiftool -DateTimeOriginal -d "%Y-%m-%d" "$FILE" 2>/dev/null | awk -F': ' '{print $2}' | tr -d '[:space:]')
+    if [[ $? -ne 0 ]]; then
+        echo "$(date +"%Y-%m-%d %H:%M:%S") - Error reading EXIF DateTimeOriginal: $FILE" | tee -a "$LOG_FILE"
+    fi
 
     # If EXIF date is not available, check QuickTime metadata for videos
     if [[ -z "$DATE" ]]; then
-        DATE=$(exiftool -CreateDate -d "%Y-%m-%d" "$FILE" | awk -F': ' '{print $2}' | tr -d '[:space:]')
+        DATE=$(exiftool -CreateDate -d "%Y-%m-%d" "$FILE" 2>/dev/null | awk -F': ' '{print $2}' | tr -d '[:space:]')
+        if [[ $? -ne 0 ]]; then
+            echo "$(date +"%Y-%m-%d %H:%M:%S") - Error reading QuickTime CreateDate: $FILE" | tee -a "$LOG_FILE"
+        fi
     fi
 
     # Additional metadata tags for better accuracy
     if [[ -z "$DATE" ]]; then
-        DATE=$(exiftool -MediaCreateDate -d "%Y-%m-%d" "$FILE" | awk -F': ' '{print $2}' | tr -d '[:space:]')
+        DATE=$(exiftool -MediaCreateDate -d "%Y-%m-%d" "$FILE" 2>/dev/null | awk -F': ' '{print $2}' | tr -d '[:space:]')
+        if [[ $? -ne 0 ]]; then
+            echo "$(date +"%Y-%m-%d %H:%M:%S") - Error reading MediaCreateDate: $FILE" | tee -a "$LOG_FILE"
+        fi
     fi
     if [[ -z "$DATE" ]]; then
-        DATE=$(exiftool -ModifyDate -d "%Y-%m-%d" "$FILE" | awk -F': ' '{print $2}' | tr -d '[:space:]')
+        DATE=$(exiftool -ModifyDate -d "%Y-%m-%d" "$FILE" 2>/dev/null | awk -F': ' '{print $2}' | tr -d '[:space:]')
+        if [[ $? -ne 0 ]]; then
+            echo "$(date +"%Y-%m-%d %H:%M:%S") - Error reading ModifyDate: $FILE" | tee -a "$LOG_FILE"
+        fi
     fi
     if [[ -z "$DATE" ]]; then
-        DATE=$(exiftool -FileCreateDate -d "%Y-%m-%d" "$FILE" | awk -F': ' '{print $2}' | tr -d '[:space:]')
+        DATE=$(exiftool -FileCreateDate -d "%Y-%m-%d" "$FILE" 2>/dev/null | awk -F': ' '{print $2}' | tr -d '[:space:]')
+        if [[ $? -ne 0 ]]; then
+            echo "$(date +"%Y-%m-%d %H:%M:%S") - Error reading FileCreateDate: $FILE" | tee -a "$LOG_FILE"
+        fi
     fi
 
     # If metadata is still unavailable, use file creation date
     if [[ -z "$DATE" ]]; then
         DATE=$(date -r "$FILE" +"%Y-%m-%d" 2>/dev/null) || DATE=""
+        if [[ $? -ne 0 ]]; then
+            echo "$(date +"%Y-%m-%d %H:%M:%S") - Error reading file creation date: $FILE" | tee -a "$LOG_FILE"
+        fi
     fi
 
     if [[ -z "$DATE" ]]; then
@@ -113,11 +125,6 @@ process_file() {
         NEWFILE="$TARGET_DIR/${BASENAME%.*}_$COUNT.${BASENAME##*.}"
         COUNT=$((COUNT + 1))
     done
-
-    if $DRY_RUN; then
-        echo "$(date +"%Y-%m-%d %H:%M:%S") - Would move $FILE to $NEWFILE"
-        return 0
-    fi
 
     # Move file to target directory using rsync with --remove-source-files
     if rsync -a --remove-source-files --no-perms --no-owner --no-group "$FILE" "$NEWFILE"; then
